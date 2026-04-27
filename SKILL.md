@@ -48,11 +48,51 @@ description: 从 Telegram 入站视频快速产出 3-4 条竖版短视频，支�
    - 用户这类口播常见偏好：首页视觉可以很重，颜色要强对比、字体要够大够炸裂；但字幕区要稳定，通常从下三分之一附近开始（约画面高度 57%~60%），不要贴太底，也不要飘到中间挡脸。
    - 首页大字报与正文字幕是两套逻辑：开头 0.2~0.4 秒可以用高饱和红/黄等重色块+超大字吸睛；正文字幕仍然保持白字黑边、位置固定、以可读性优先。
 
+# 语音转字幕（两种方案）
+
+## 方案 A：OpenAI Whisper API（推荐）
+使用 `scripts/transcribe_openai.py`，优点是没有本地模型开销，适合各种配置环境。
+
+```bash
+cd <job_dir>
+python3 scripts/transcribe_openai.py source.mp4 -o transcript.json
+```
+
+返回 JSON 结构包含 `segments` 和 `words`，可直接用于生成 ASS 字幕。
+
+**参数说明**：
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-o` | `transcript.json` | 输出路径 |
+| `--segment` | 300 | 单段最长秒数，超长视频会自动切片 |
+
+**配置 API Key**：
+1. 环境变量：`export OPENAI_API_KEY=sk-xxx`
+2. 或放入 OpenClaw 配置文件：`~/.openclaw/openclaw.json`
+
+**注意事项**：
+- OpenAI 单文件限制 25MB，脚本会自动切片转写
+- API 费用约 $0.006/分钟，一个 10 分钟视频约 $0.06
+- 需要能访问 OpenAI API 的网络环境
+
+## 方案 B：faster-whisper（本地运行）
+如果不能访问 OpenAI API，可以用本地 `faster-whisper`：
+
+```python
+from faster_whisper import WhisperModel
+model = WhisperModel("small", device="cpu")
+segments, _ = model.transcribe("source.mp4")
+for seg in segments:
+    print(f"{seg.start:.2f} --> {seg.end:.2f}: {seg.text}")
+```
+
+安装：`pip install faster-whisper`
+
 # FFmpeg 模板（单段）
 ```bash
-ffmpeg -y \
-  -stream_loop -1 -i /path/to/bgm.ogg \
-  -i /path/to/clip.mp4 \
+ffmpeg -y \\
+  -stream_loop -1 -i /path/to/bgm.ogg \\
+  -i /path/to/clip.mp4 \\
   -filter_complex "
 [0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,
       volume=0.12,atempo=1.04,atrim=0:15.8,
@@ -64,9 +104,9 @@ ffmpeg -y \
  drawtext=fontfile=/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc:text='主标题':fontsize=34:fontcolor=white:borderw=2:bordercolor=black@0.6:x=(w-text_w)/2:y=578:enable='between(t,0,5.2)',
  drawtext=fontfile=/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc:text='副标题1':fontsize=27:fontcolor=0xF7D154:borderw=2:bordercolor=black@0.6:x=(w-text_w)/2:y=628:enable='between(t,0,5.2)',
  drawtext=fontfile=/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc:text='副标题2':fontsize=27:fontcolor=white:borderw=2:bordercolor=black@0.6:x=(w-text_w)/2:y=678:enable='between(t,0,5.2)'
-[v]" \
-  -map "[v]" -map "[a]" \
-  -c:v libx264 -preset veryfast -crf 21 -c:a aac -shortest \
+[v]" \\
+  -map "[v]" -map "[a]" \\
+  -c:v libx264 -preset veryfast -crf 21 -c:a aac -shortest \\
   /path/to/clip_pretty.mp4
 ```
 
@@ -93,7 +133,7 @@ ffmpeg -y \
 ```bash
 mkdir -p /home/ubuntu/video_jobs/<job_id>/music_mixkit
 for id in 250 288 200 801; do
-  curl -L -o /home/ubuntu/video_jobs/<job_id>/music_mixkit/$id.mp3 \
+  curl -L -o /home/ubuntu/video_jobs/<job_id>/music_mixkit/$id.mp3 \\
     "https://assets.mixkit.co/music/$id/$id.mp3"
 done
 ```
@@ -106,7 +146,7 @@ done
 
 示例：
 ```bash
-ffmpeg -y -i clip_with_text.mp4 -i song.mp3 \
+ffmpeg -y -i clip_with_text.mp4 -i song.mp3 \\
   -filter_complex "
 [0:a]volume=0.95[a0];
 [1:a]volume=0.24,atrim=0:15.8,
@@ -114,7 +154,7 @@ ffmpeg -y -i clip_with_text.mp4 -i song.mp3 \
       afade=t=out:st=14.5:d=0.9[a1];
 [a0][a1]amix=inputs=2:duration=first:dropout_transition=1,
 alimiter=limit=0.92[a]
-" \
+" \\
   -map 0:v -map "[a]" -c:v copy -c:a aac -shortest out.mp4
 ```
 
